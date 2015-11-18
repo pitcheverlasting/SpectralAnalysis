@@ -41,8 +41,14 @@ def CrossPowerSpectrum(ts1, ts2, fs, dt):
 	"""Compute Cross spectral density (using csd)"""
 
 	# Gapfill the missing value
-	ts1[np.isnan(ts1)==True | np.isnan(ts2)==True] = nanmean(ts1)
-	ts2[np.isnan(ts1)==True or np.isnan(ts2)==True] = nanmean(ts2)
+	mk1 = np.isnan(ts1)
+	mk2 = np.isnan(ts2)
+
+	ts1[mk1==True] = nanmean(ts1)
+	ts1[mk2==True] = nanmean(ts1)
+	ts2[mk1==True] = nanmean(ts2)
+	ts2[mk2==True] = nanmean(ts2)
+
 	nwindow = 9          						# Number of windows to smooth data
 	length = math.floor(len(ts1)/nwindow)  		# Length calculated by deviding the window
 	nwindow_fl = math.floor(log2(length))		# Number of windows with floor window length
@@ -52,6 +58,15 @@ def CrossPowerSpectrum(ts1, ts2, fs, dt):
 
 	return [f, Pxy_den]
 
+def Coherence_calculate(ts1, ts2, fs, dt):
+	"""Compute magnitude squared coherence (calculate)"""
+
+	f, Pxy_den = CrossPowerSpectrum(ts1, ts2, fs, dt)
+	Pxx_den = Power_Spectrum(ts1, fs, dt)[1]
+	Pyy_den = Power_Spectrum(ts2, fs, dt)[1]
+	Cxy = abs(Pxy_den)**2/(Pxx_den*Pyy_den)
+
+	return [f, Cxy, Pxy_den, Pxx_den, Pyy_den]
 
 def Coherence(ts1, ts2, fs, dt):
 

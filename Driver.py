@@ -51,11 +51,11 @@ def Coherence_Station():
 ## method1: average the coherence spectrum
 def Coherence_Station2Basin():
 
-	fig = plt.figure(figsize=(12, 30))
+	fig = plt.figure(figsize=(24, 18))
 	cohere = []
 
 	for ibasin in xrange(0, 10):
-		cohere_basin = zeros((station_number[ibasin], nvar, nf))
+		cohere_basin = [] #empty((station_number[ibasin], nvar, nf))
 
 		for istation in xrange(0, station_number[ibasin]):
 			data = scipy.io.loadmat('%s/%s_AP.mat' %(datadir, ibasin+1))
@@ -72,20 +72,21 @@ def Coherence_Station2Basin():
 			pan = data['pan'][0, istation].flatten()
 			# Compute the coherence
 			freq = FFT.Coherence(input[0], pan, sampling_frequency, 'linear')[0]
-			cohere_basin[istation, :, :] = vstack([FFT.Coherence(v, pan, sampling_frequency, 'linear')[1] for v in input])
+			cohere_basin.append(vstack([FFT.Coherence(v, pan, sampling_frequency, 'linear')[1] for v in input]).reshape(1, nvar, nf))
 
 		# store basin average
+		cohere_basin = vstack(cohere_basin)
 		cohere.append(mean(cohere_basin, axis=0).reshape(1, nvar, nf))
 
 		## DRAW FIGURE---------------
-	 	ax = fig.add_subplot(4, 3, ibasin+1)
+	 	ax = fig.add_subplot(3, 4, ibasin+1)
 		Plotting.CoherenceBasinPlot(ax, mean(cohere_basin, axis=0), sampling_frequency, freq, basinlongs[ibasin])
 
 	# for national average
-	ax = fig.add_subplot(4, 3, 11)
+	ax = fig.add_subplot(3, 4, 11)
 	Plotting.CoherenceBasinPlot(ax, mean(vstack(cohere), axis=0), sampling_frequency, freq, 'Average')
 	ax.legend(bbox_to_anchor=(1.1, 0.5), loc='center left')
-	# fig.tight_layout()
+	fig.tight_layout()
 	plt.show()
 
 	return
@@ -147,6 +148,4 @@ def Coherence_average2Basin():
 # Run the step functions
 ##====================================================================
 # Coherence_Station()
-
-# Coherence_Station2Basin()
-Coherence_average2Basin()
+Coherence_Station2Basin()
