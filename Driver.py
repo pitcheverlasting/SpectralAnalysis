@@ -19,7 +19,6 @@ variables = ['tavg', 'sun', 'wind', 'ea', 'lc', 'ts', 'vpd', 'rain']
 basinlongs=['Songhuajiang','Liaohe','Northwestern','Haihe','Yellow', 'Yangtze','Huaihe','Southeastern','Southwestern','Pearl']
 # geoinfo = load('%s/station_geoinfo' %workspace)
 station_number = load('%s/basin_station_number' %workspace)
-
 # Dimensions
 styr = 1961
 edyr = 2006
@@ -32,12 +31,21 @@ nbasin = 10
 nvar = 8
 sampling_frequency = 1/(24.0 * 3600.0)  # unit: per day
 
+def Coherence_Frequency():
+
+	data = scipy.io.loadmat('%s/1_AP.mat' %(datadir))
+	input = data[variables[0]][0, 0].flatten()
+	pan = data['pan'][0, 0].flatten()
+	freq = FFT.Coherence(input, pan, sampling_frequency, 'linear')[0]
+
+	return freq
 
 def Coherence_Station():
 
 	for ibasin in xrange(1, 2): #11):
 		for istation in xrange(0, 1):  #station_number[ibasin]):
 			data = scipy.io.loadmat('%s/%s_AP.mat' %(datadir, ibasin))
+			print data['tavg'][0,0]
 			# the PowerSpectrum method take the matrix as different segment, so shoule be a 1d array
 			input = [data[v][0, 0].flatten() for v in variables]
 			pan = data['pan'][0, 0].flatten()
@@ -48,20 +56,15 @@ def Coherence_Station():
 
 	return
 
-## method1: average the coherence spectrum
+## average the coherence spectrum
 def Coherence_Station2Basin():
 
-	fig = plt.figure(figsize=(24, 18))
-	cohere = []
-
 	for ibasin in xrange(0, 10):
-		cohere_basin = [] #empty((station_number[ibasin], nvar, nf))
-
+		cohere_basin = []
 		for istation in xrange(0, station_number[ibasin]):
 			data = scipy.io.loadmat('%s/%s_AP.mat' %(datadir, ibasin+1))
 			## Quality check
 			input = [np.isnan(nanmean(data[v][0, istation])) for v in variables]
-			flag = []
 			flag = [1 for i in input if i == True]
 			if len(flag) > 0:
 				print "Ignore %s station %s!" % (basinlongs[ibasin], istation)
@@ -71,13 +74,22 @@ def Coherence_Station2Basin():
 			input = [data[v][0, istation].flatten() for v in variables]
 			pan = data['pan'][0, istation].flatten()
 			# Compute the coherence
-			freq = FFT.Coherence(input[0], pan, sampling_frequency, 'linear')[0]
 			cohere_basin.append(vstack([FFT.Coherence(v, pan, sampling_frequency, 'linear')[1] for v in input]).reshape(1, nvar, nf))
 
 		# store basin average
 		cohere_basin = vstack(cohere_basin)
-		cohere.append(mean(cohere_basin, axis=0).reshape(1, nvar, nf))
+		cohere_basin.dump('%s/coherence_allvar_%s' %(workspace, basinlongs[ibasin]))
 
+	return
+
+def PlotCoherence():
+
+	fig = plt.figure(figsize=(24, 18))
+	cohere = []
+	freq = Coherence_Frequency()
+	for ibasin in xrange(0, 10):
+		cohere_basin = load('%s/coherence_allvar_%s' %(workspace, basinlongs[ibasin]))
+		cohere.append(mean(cohere_basin, axis=0).reshape(1, nvar, nf))
 		## DRAW FIGURE---------------
 	 	ax = fig.add_subplot(3, 4, ibasin+1)
 		Plotting.CoherenceBasinPlot(ax, mean(cohere_basin, axis=0), sampling_frequency, freq, basinlongs[ibasin])
@@ -85,12 +97,68 @@ def Coherence_Station2Basin():
 	# for national average
 	ax = fig.add_subplot(3, 4, 11)
 	Plotting.CoherenceBasinPlot(ax, mean(vstack(cohere), axis=0), sampling_frequency, freq, 'Average')
-	ax.legend(bbox_to_anchor=(1.1, 0.5), loc='center left')
+	ax.legend(bbox_to_anchor=(1.35, 0.5), loc='center left', fontsize=21)
 	fig.tight_layout()
 	plt.show()
 
+def PSD_Station2Basin():
+
+	for ibasin in xrange(0, 10):
+		psd_basin = []
+		for istation in xrange(0, station_number[ibasin]):
+			data = scipy.io.loadmat('%s/%s_AP.mat' %(datadir, ibasin+1))
+			## Quality check
+			input = [np.isnan(nanmean(data[v][0, istation])) for v in variables]
+			flag = [1 for i in input if i == True]
+			if len(flag) > 0:
+				print "Ignore %s station %s!" % (basinlongs[ibasin], istation)
+				continue
+
+			# the PowerSpectrum method take the matrix as different segment, so shoule be a 1d array
+			input = [data[v][0, istation].flatten() for v in variables]
+			# pan = data['pan'][0, istation].flatten()
+			# Compute the coherence
+			psd_basin.append(vstack([FFT.Power_Spectrum(v, sampling_frequency, 'linear')[1] for v in input]).reshape(1, nvar, nf))
+
+		# store basin average
+		psd_basin = vstack(psd_basin)
+		psd_basin.dump('%s/psd_allvar_%s' %(workspace, basinlongs[ibasin]))
+
 	return
 
+def PlotPSD():
+
+	fig = plt.figure(figsize=(24, 18))
+	psd = []
+	freq = Coherence_Frequency()
+	for ibasin in xrange(0, 10):
+		psd_basin = load('%s/psd_allvar_%s' %(workspace, basinlongs[ibasin]))
+		psd.append(mean(psd_basin, axis=0).reshape(1, nvar, nf))
+		## DRAW FIGURE---------------
+	 	ax = fig.add_subplot(3, 4, ibasin+1)
+		Plotting.PSDBasinPlot(ax, mean(psd_basin, axis=0), sampling_frequency, freq, basinlongs[ibasin])
+
+	# for national average
+	ax = fig.add_subplot(3, 4, 11)
+	Plotting.PSDBasinPlot(ax, mean(vstack(psd), axis=0), sampling_frequency, freq, 'Average')
+	ax.legend(bbox_to_anchor=(1.35, 0.5), loc='center left', fontsize=21)
+	fig.tight_layout()
+	plt.show()
+
+##====================================================================
+# Run the step functions
+##====================================================================
+# Coherence_Station()
+# Coherence_Station2Basin()
+# PlotCoherence()
+# PSD_Station2Basin()
+PlotPSD()
+
+
+
+
+##======================================================
+# no use
 ## method2: average the time series first and then do the spectrum
 def Coherence_average2Basin():
 
@@ -143,9 +211,3 @@ def Coherence_average2Basin():
 	plt.show()
 
 	return
-
-##====================================================================
-# Run the step functions
-##====================================================================
-# Coherence_Station()
-Coherence_Station2Basin()
