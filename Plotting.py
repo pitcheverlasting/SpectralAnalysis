@@ -70,3 +70,36 @@ def PSDBasinPlot(ax, psd, fs, freq, title):
 	plt.grid(True)
 
 	return
+
+def Mapshow(data, lons, lats, min, max, cmp, tit, unit, figdir, filename):
+	m = Basemap(llcrnrlon=82, llcrnrlat=0, urcrnrlon=140, urcrnrlat=55, projection='lcc', lat_1=20, lat_2=40, lon_0=108)
+	# draw boundaries
+	m.readshapefile('/home/water5/lpeng/Masks/Shapefile/china_map/bou1_4m/bou1_4l', 'CHN_adm1', linewidth=2)
+	m.readshapefile('/home/water5/lpeng/Masks/Shapefile/china_map/bou2_4m/bou2_4l', 'CHN_adm2', linewidth=1)
+	# m.drawparallels(np.arange(25, 65, 20), labels=[1, 0, 0, 0])  # only left ytick
+	# m.drawmeridians(np.arange(-120, -40, 20), labels=[0, 0, 0, 1])  # only bottom xtick
+
+	# idx = np.where(np.isnan(data) == 0)
+	# lon = lons[idx[1]]
+	# lat = lats[idx[0]]
+	# data = data[idx]
+	im = m.scatter(lons, lats, 50, marker='o', c=data, vmin=min, vmax=max, latlon=True, cmap=cmp)
+	cb = m.colorbar(im, pad='3%')
+	# plotdata = m.transform_scalar(data, lons, lats, nx, ny)
+	# im = m.imshow(plotdata, vmin=min, vmax=max, cmap=cmp)
+	plt.title(tit)
+	plt.xlabel(unit, labelpad=20)
+	# savefig('%s%s' % (figdir, filename))
+	plt.show()
+	plt.clf()
+
+def ShapefileShow():
+	m = Basemap(llcrnrlon=82, llcrnrlat=0, urcrnrlon=140, urcrnrlat=55, projection='lcc', lat_1=20, lat_2=40, lon_0=108)
+	# m = Basemap(projection='merc', llcrnrlon=70, llcrnrlat=15, urcrnrlon=140, urcrnrlat=55, lat_ts=20)
+	# draw boundaries
+	# m.etopo()
+	# m.drawparallels(np.arange(25, 65, 20), labels=[1, 0, 0, 0])  # only left ytick
+	# m.drawmeridians(np.arange(-120, -40, 20), labels=[0, 0, 0, 1])  # only bottom xtick
+	m.readshapefile('/home/water5/lpeng/Masks/Shapefile/china_map/bou1_4m/bou1_4l', 'CHN_adm1', linewidth=2)
+	m.readshapefile('/home/water5/lpeng/Masks/Shapefile/china_map/bou2_4m/bou2_4l', 'CHN_adm2', linewidth=1)
+	plt.show()

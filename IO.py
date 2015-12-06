@@ -84,3 +84,9 @@ def mat2python():
 	geoinfo[:,4] = station_geoinfo['stationsbybasin'][:,4] # station basin ID
 
 	return
+
+def daily2monthly(dates, daily_time_series):
+	dmonths = dates.month
+	res = np.diff(dmonths)
+	print res
+# 	for

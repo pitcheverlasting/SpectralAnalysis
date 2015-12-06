@@ -92,3 +92,59 @@ def Coherence(ts1, ts2, fs, dt):
 def WaveletCoherence():
 
 	return
+
+
+##======================================================
+# no use
+## method2: average the time series first and then do the spectrum
+# def Coherence_average2Basin():
+#
+# 	fig = plt.figure(figsize=(12, 30))
+# 	input = []; pan = []; cohere = []
+#
+# 	for ibasin in xrange(0, 10):
+# 		input_basin = zeros((station_number[ibasin], nvar, tstep))
+# 		pan_basin = zeros((station_number[ibasin], tstep))
+# 		for istation in xrange(0, station_number[ibasin]):
+# 			data = scipy.io.loadmat('%s/%s_AP.mat' %(datadir, ibasin+1))
+# 			## Quality check
+# 			input_mask = [np.isnan(nanmean(data[v][0, istation])) for v in variables]
+# 			flag = []
+# 			flag = [1 for i in input_mask if i == True] # which means one variable is missing
+# 			if len(flag) > 0:
+# 				print "Ignore %s station %s!" % (basinlongs[ibasin], istation)
+# 				continue
+#
+# 			# the PowerSpectrum method take the matrix as different segment, so shoule be a 1d array
+# 			input_basin[istation, :, :] = vstack([data[v][0, istation].flatten() for v in variables])
+# 			pan_basin[istation, :] = data['pan'][0, istation].flatten()
+#
+# 		input.append(mean(input_basin, axis=0).reshape(1, nvar, tstep))
+# 		pan.append(mean(pan_basin, axis=0))
+# 		del input_basin, pan_basin
+# 		# Compute the coherence
+# 		freq = FFT.Coherence(input[ibasin][0, 0, :], pan[ibasin], sampling_frequency, 'linear')[0]
+# 		coh = vstack([FFT.Coherence(input[ibasin][0, v, :], pan[ibasin], sampling_frequency, 'linear')[1] for v in xrange(0, nvar)])  # nvar, nf
+# 		# store basin average
+# 		cohere.append(coh.reshape(1, nvar, nf))
+#
+# 		## DRAW FIGURE---------------
+# 	 	ax = fig.add_subplot(4, 3, ibasin+1)
+# 		Plotting.CoherenceBasinPlot(ax, coh, sampling_frequency, freq, basinlongs[ibasin])
+#
+# 	# for national average
+# 	# method 1: calculate national average first then coherence
+# 	input_all = mean(vstack(input), axis=0) # nvar, tstep
+# 	pan_all = mean(vstack(pan), axis=0).flatten() # 1, tstep
+# 	coh1 = vstack([FFT.Coherence(input_all[v, :].flatten(), pan_all, sampling_frequency, 'linear')[1] for v in xrange(0, nvar)])
+# 	ax = fig.add_subplot(4, 3, 11)
+# 	Plotting.CoherenceBasinPlot(ax, coh1, sampling_frequency, freq, 'Average1')
+# 	# method 2: average the basin coherence to get the national one
+# 	coh2 = mean(vstack(cohere), axis=0)
+# 	ax = fig.add_subplot(4, 3, 12)
+# 	Plotting.CoherenceBasinPlot(ax, coh2, sampling_frequency, freq, 'Average2')
+# 	# ax.legend(bbox_to_anchor=(1.1, 0.5), loc='center left')
+# 	# fig.tight_layout()
+# 	plt.show()
+#
+# 	return
