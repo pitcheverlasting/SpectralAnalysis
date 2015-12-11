@@ -4,6 +4,8 @@ from pylab import *
 import pickle
 import scipy.io
 import scipy.stats
+from scipy.optimize import minimize
+import statsmodels.tools.eval_measures as evaluate
 import pandas as pd
 import IO, FFT, Plotting
 from PET_Library import Data
@@ -11,13 +13,13 @@ from PETREND import TrendAnalysis, TrendAttribution
 # #=============================path================================
 datadir = '/home/water5/lpeng/script/PROJECT/pan_evaporation_china/original'
 workspace = '/home/water5/lpeng/script/PROJECT/pan_evaporation_china/workspace'
-figdir = '/home/water5/Figure/pan_spectral/trend/'
+figdir = '/home/water5/lpeng/Figure/pan_spectral/trend/'
 ##=============================variable============================
 vars = ['time', 'p', 'tavg', 'tmin', 'tmax', 'ea', 'rh', 'tc', 'lc', 'wind', 'ts', 'sun', 'rain', 'pan', 'vpd',  'estavg', 'rh_test']  # time 1,2,3 year, month, day # Note that original data is multiplied by 10 from the normal unit. This process data devide 10 so that it becomes the original unit
 varlongs = ['time', 'daily averaged pressure [hpa]', 'daily averaged air temperature [degree]', 'daily minimum air temperature [degree]', 'daily maximum air temperature [degree]', 'daily averaged vapor pressure [hpa]', 'daily averaged relative humidity [%]', 'daily averaged total cloud cover', 'daily averaged low cloud cover', 'daily averaged wind speed [m/s]', 'daily averaged surface temperature(at 0cm level) [degree]', 'daily averaged sunshine hour [hr]', 'daily averaged rainfall [mm]', 'daily averaged pan evaporation [mm]', 'daily averaged vapor pressure deficit [hpa]', 'daily saturated vapor pressure using daily averaged air temperature [hpa]', 'daily averaged relative humidity calculated [%]']
 # varname = ["Air Temperature", "Net Radiation", "Gamma", "Slope of Saturation Vapor Pressure Curve", "Vapor Pressure Deficit", "Wind", "Latent Heat Constant", "Saturated Vapor Pressure", "Humidity", 'Outgoing Shortwave Radiation', 'Outgoing Longwave Radiation']
 
-variables = ['tavg', 'sun', 'wind', 'ea', 'lc', 'ts', 'vpd', 'rain']
+variables = ['tavg', 'sun', 'wind', 'ea', 'tc', 'ts', 'vpd', 'rain']
 vars_penpan = ['tavg', 'tmax', 'tmin', 'p', 'ea', 'wind', 'tc', 'lat', 'elev'] #'sun'
 basinlongs=['Songhuajiang','Liaohe','Northwestern','Haihe','Yellow', 'Yangtze','Huaihe','Southeastern','Southwestern','Pearl']
 geoinfo = load('%s/station_geoinfo' %workspace)
@@ -36,9 +38,162 @@ doys = vstack([dates[i].timetuple().tm_yday for i in xrange(0, tstep)])
 ## quality check using data availability as criteria
 station_flag = pickle.load(open('station_flag','rb'))
 station_qc = [np.where(station_flag[ibasin][:, 0]==0)[0] for ibasin in xrange(0, 10)]
-station_pan_flag = pickle.load(open('station_pan_flag','rb'))
+station_pan_flag = pickle.load(open('station_pan_80_flag','rb'))
 station_pan_qc = [np.where(station_pan_flag[ibasin][:, 0]==0)[0] for ibasin in xrange(0, 10)]
 good_stations = [intersect1d(station_qc[i], station_pan_qc[i]) for i in xrange(0, 10)]
+
+##########################################################################
+# construct database
+##########################################################################
+# Step1. Select good station: no missing years and missing months 80% coverage
+# Step1.1 Select good met station
+def Quality_Check_station():
+	"calculate the total number of missing records for each station"
+	flag_basins = []
+	for ibasin in xrange(0, 10):
+		flag = zeros((station_number[ibasin], 2))
+		for istation in xrange(0, station_number[ibasin]):
+			data = scipy.io.loadmat('%s/%s_AP.mat' %(datadir, ibasin+1))
+			# for a station to count it must have more than 80% of coverage for each year and for all variables for Epan calculation
+			for v in vars_penpan[:-2]:
+				ts = data[v][0, istation][0:tstep]
+
+				# Case1: If the whole series is 0, then throw away
+				if np.nansum(ts) == 0.0:
+					flag[istation, 0] = 1
+					flag[istation, 1] = 1
+					break
+				# # Case2: For every month, if the missing value is greater than the threshold 20 % then mask down, stricter than year
+				npoints_mon = 31.0*(1-80.0/100.0)
+				for year in xrange(styr, edyr+1):
+					for month in xrange(1, 13):
+						count = np.isnan(ts[(dyears==year)&(dmonths==month)]).sum()
+
+						if count > int(npoints_mon):
+							flag[istation, 0] = 1
+							flag[istation, 1] = 2
+							break
+
+		flag_basins.append(flag)
+
+	return flag_basins
+# station_flag = Quality_Check_station()
+# pickle.dump(station_flag, open('station_flag','wb'))
+
+# Step1.2 Select good pan station
+def Quality_Check_station_pan():
+	"calculate the total number of missing records for each station"
+	flag_basins = []
+	for ibasin in xrange(0, 10):
+		flag = zeros((station_number[ibasin], 2))
+		for istation in xrange(0, station_number[ibasin]):
+			data = scipy.io.loadmat('%s/%s_AP.mat' %(datadir, ibasin+1))
+			# for a station to count it must have more than 80% of coverage for each year and for all variables for Epan calculation
+			ts = data['pan'][0, istation][0:tstep]
+			# Case1: If the whole series is 0, then throw away
+			if np.nansum(ts) == 0.0:
+				flag[istation, 0] = 1
+				flag[istation, 1] = 1
+				break
+			# # Case2: For every month, if the missing value is greater than the threshold 20 % then mask down, stricter than year
+			for year in xrange(styr, edyr+1):
+				for month in xrange(1, 13):
+					npoints_year = 31.0*(1-60.0/100.0)
+					count = np.isnan(ts[(dyears==year)&(dmonths==month)]).sum()
+					if count > int(npoints_year):
+						flag[istation, 0] = 1
+						flag[istation, 1] = 2
+						break
+
+		flag_basins.append(flag)
+
+	return flag_basins
+
+# station_pan_flag = Quality_Check_station_pan()
+# pickle.dump(station_pan_flag, open('station_pan_60_flag','wb'))
+
+station_list_names = ['_all_stations', '_good_stations', '_for_stations', '_pan_stations']
+station_lists = [station_number, good_stations, station_qc, station_pan_qc]
+fignames = ['all', 'good', 'forcing', 'pan']
+cols = ['grey', 'springgreen', 'aquamarine', 'lightcoral']
+
+# Step1.3 Plot good stations
+def Get_Selected_Station_Locations(j):
+	lons = []
+	lats = []
+	for ibasin in xrange(0, 10):
+		for istation in station_lists[j][ibasin]:
+			data = scipy.io.loadmat('%s/%s_AP.mat' %(datadir, ibasin+1))
+			index = np.where(geoinfo[:, 0]==data['station_name'][0, istation])[0]
+			lons.append(geoinfo[index, 2])
+			lats.append(geoinfo[index, 1])
+	lons = vstack(lons)
+	lats = vstack(lats)
+	lons.dump('%s/lons%s' %(workspace, station_list_names[j]))
+	lats.dump('%s/lats%s' %(workspace, station_list_names[j]))
+	return
+
+def Plot_Selected_Station_Locations(j):
+	lons = load('%s/lons%s' %(workspace, station_list_names[j]))
+	lats = load('%s/lats%s' %(workspace, station_list_names[j]))
+	Plotting.Mapshow(cols[j], lons, lats, 45, None, None, None, 'Qualified pan evaporation met stations (%s)' %len(lons), 'Met Stations', '', figdir, '%s_stations_scattermap.png' %fignames[j])
+	return
+
+# Get_Selected_Station_Locations(1)
+# Plot_Selected_Station_Locations(1)
+
+###====================================================================
+# Step1.4 Gapfill the missing values in the selected stations
+def Gapfill(daily):
+	"return the array, not pandas object"
+	ts = pd.Series(daily, index=dates).fillna(method='pad').values
+	return ts
+
+def daily2annual(daily):
+	ts = pd.Series(daily, index=dates).resample('A', how='mean').values
+	return ts
+
+def daily2monthly(daily):
+	ts = pd.Series(daily, index=dates).resample('M', how='mean').values
+	return ts
+###====================================================================
+
+## parameterization
+def KGE(model, obs):
+
+	rho = scipy.stats.pearsonr(model, obs)
+	mean_ratio = np.mean(model) / np.mean(obs)
+	std_ratio = np.std(model) / np.std(obs)
+
+	return 1 - ((rho[0] - 1) ** 2 + (mean_ratio - 1) ** 2 + (std_ratio - 1) ** 2) ** 0.5
+
+def Calibrate_fq():
+	def Function(params):
+		a, b = params
+		res = []
+		for ibasin in xrange(0, 1): #10):
+			for istation in good_stations[ibasin]:
+				# print ibasin, istation
+				data = scipy.io.loadmat('%s/%s_AP.mat' %(datadir, ibasin+1))
+				index = np.where(geoinfo[:, 0]==data['station_name'][0, istation])[0]
+				# pan_obs = data['pan'][0, istation][0:tstep].flatten()
+				pan_obs_gapfill = Gapfill(data['pan'][0, istation][0:tstep].flatten())
+				## Prepare for the input data for Epan calculation
+				INPUT = {vars_penpan[i]: Gapfill(data[v][0, istation][0:tstep].flatten()) for i, v in enumerate(vars_penpan[:-2])}
+				INPUT['doy'] = doys.flatten()
+				INPUT['lat'] = geoinfo[index, 1]
+				INPUT['elev'] = geoinfo[index, 3]
+				pan_mod = Data(INPUT, 'cloud').Penpan_u2(a, b)
+				res.append(evaluate.rmse(daily2monthly(pan_mod), daily2monthly(pan_obs_gapfill)))
+
+		return vstack(res).mean()
+			# exit()
+			# A.append(res['x'][0])
+			# B.append(res['x'][1])
+	bnd = ((0, None), (0, None))
+	test = minimize(Function, array([1.313, 1.381]), bounds=bnd, method='SLSQP')
+	print test
+
 ##########################################################################
 # for spectral coherece analysis
 ##########################################################################
@@ -61,18 +216,16 @@ def Coherence_Station():
 	for ibasin in xrange(1, 2): #11):
 		for istation in xrange(0, 1):  #station_number[ibasin]):
 			data = scipy.io.loadmat('%s/%s_AP.mat' %(datadir, ibasin))
-			plt.plot(data['tavg'][0,0]-(data['tmax'][0,0]+data['tmin'][0,0])/2)
-			plt.show()
-			exit()
 			# the PowerSpectrum method take the matrix as different segment, so shoule be a 1d array
 			input = [data[v][0, 0].flatten() for v in variables]
 			pan = data['pan'][0, 0].flatten()
 			# result = FFT.Power_Spectrum(pan, sampling_frequency, 'linear')
-			coh = [FFT.Coherence(var, pan, sampling_frequency, 'linear')[1] for var in input]
+			coh = [FFT.Coherence(var, pan*0.9+0.1, sampling_frequency, 'linear')[1] for var in input]
 			freq = FFT.Coherence(input[0], pan, sampling_frequency, 'linear')[0]
 			Plotting.CoherenceStationPlot(coh, sampling_frequency, freq)
 
 	return
+
 ## average the coherence spectrum
 def Coherence_Station2Basin():
 
@@ -162,106 +315,187 @@ def PlotPSD():
 	fig.tight_layout()
 	plt.show()
 
+##====================================================================
+# Run the step functions for spectral analysis
+##====================================================================
+# Coherence_Station()
+# Coherence_Station2Basin()
+# PlotCoherence()
+# PSD_Station2Basin()
+# PlotPSD()
 
+
+##########################################################################
+# Calculate penpan modelled PE
+##########################################################################
+
+def Calculate_Epenpan_daily():
+	# Pan_obs = []
+	# Pan_obs_gapfill = []
+	Pan_mod = []
+	for ibasin in xrange(0, 10):
+		for istation in good_stations[ibasin]:
+			print ibasin, istation
+			data = scipy.io.loadmat('%s/%s_AP.mat' %(datadir, ibasin+1))
+			index = np.where(geoinfo[:, 0]==data['station_name'][0, istation])[0]
+			# pan_obs = data['pan'][0, istation][0:tstep].flatten()
+			# pan_obs_gapfill = Gapfill(data['pan'][0, istation][0:tstep].flatten())
+			## Prepare for the input data for Epan calculation
+			INPUT = {vars_penpan[i]: Gapfill(data[v][0, istation][0:tstep].flatten()) for i, v in enumerate(vars_penpan[:-2])}
+			INPUT['doy'] = doys.flatten()
+			INPUT['lat'] = geoinfo[index, 1]
+			INPUT['elev'] = geoinfo[index, 3]
+
+			## Calculate Epan and evaluation
+			pan_mod = Data(INPUT, 'cloud').penpan
+			# Collect the data and geoinfo for map showing
+			# Pan_obs.append(pan_obs)
+			# Pan_obs_gapfill.append(pan_obs_gapfill)
+			Pan_mod.append(pan_mod)
+	# Pan_obs = vstack(Pan_obs)
+	# Pan_obs_gapfill = vstack(Pan_obs_gapfill)
+	Pan_mod = vstack(Pan_mod)
+	# Pan_obs.dump('%s/pan_obs_qc_good_stations' %workspace)
+	# Pan_obs_gapfill.dump('%s/pan_obs_gapfill_qc_stations' %workspace)
+	Pan_mod.dump('%s/pan_mod_good_stations_u56' %workspace)
+
+	return
+# Calculate_Epenpan_daily()
+# exit()
+def Coherence_obs_qc():
+
+	## Prepare the data for plotting
+	# pan_obs_gapfill = load('%s/pan_obs_gapfill_qc_stations' %workspace)
+
+	r2_60_stations = pickle.load(open('r2_60_stations','rb'))
+	r2_60 = hstack(r2_60_stations)
+	pan_obs_gapfill = load('%s/pan_obs_gapfill_good_stations' %workspace)[r2_60,:]
+	relatetable = load('%s/relatetable' %workspace)
+	ist = 0
+	for ibasin in xrange(0, 10):
+		cohere_obs_basin = []
+		for istation in relatetable[r2_60_stations[ibasin], 1]: #station_pan_qc[ibasin]:
+			# the PowerSpectrum method take the matrix as different segment, so shoule be a 1d array
+			data = scipy.io.loadmat('%s/%s_AP.mat' %(datadir, ibasin+1))
+			input = [Gapfill(data[v][0, istation][0:tstep].flatten()).flatten() for v in variables]
+			panobs = pan_obs_gapfill[ist, :].flatten()
+			# Compute the coherence
+			cohere_obs_basin.append(vstack([FFT.Coherence(v, panobs, sampling_frequency, 'linear')[1] for v in input]).reshape(1, nvar, nf))
+			ist = ist + 1
+
+		# store basin average
+		cohere_obs_basin = vstack(cohere_obs_basin)
+		# cohere_obs_basin.dump('%s/coherence_obs_var_qc_station_%s' %(workspace, basinlongs[ibasin]))
+		cohere_obs_basin.dump('%s/coherence_obs_var_r2_60_station_%s' %(workspace, basinlongs[ibasin]))
+
+	return
+# Coherence_obs_qc()
+
+def Coherence_mod_r260():
+
+	## Prepare the data for plotting
+	r2_60_stations = pickle.load(open('r2_60_stations_u56','rb'))
+	r2_60 = hstack(r2_60_stations)
+	pan_mod = load('%s/pan_mod_good_stations_u56' %workspace)[r2_60,:]
+	relatetable = load('%s/relatetable' %workspace)
+	stats_basin = load('%s/calibration_regressionfit_basin_u56' %workspace)
+
+	ist = 0
+	for ibasin in xrange(0, 10):
+		cohere_mod_basin = []
+		for istation in relatetable[r2_60_stations[ibasin], 1]:
+			# the PowerSpectrum method take the matrix as different segment, so shoule be a 1d array
+			data = scipy.io.loadmat('%s/%s_AP.mat' %(datadir, ibasin+1))
+			input = [Gapfill(data[v][0, istation][0:tstep].flatten()).flatten() for v in variables]
+			panmod = pan_mod[ist, :].flatten() * stats_basin[ibasin, 0] #+ stats_basin[ibasin, 1]
+			# Compute the coherence
+			cohere_mod_basin.append(vstack([FFT.Coherence(v, panmod, sampling_frequency, 'linear')[1] for v in input]).reshape(1, nvar, nf))
+			ist = ist + 1
+
+		# store basin average
+		cohere_mod_basin = vstack(cohere_mod_basin)
+		cohere_mod_basin.dump('%s/coherence_mod_var_goodstation_r2_60_u56_%s' %(workspace, basinlongs[ibasin]))
+
+	return
+# Coherence_mod_r260()
+# exit()
+def Coherence_obs_mod_r260():
+
+	## Prepare the data for plotting
+	r2_60_stations = pickle.load(open('r2_60_stations_u56','rb'))
+	pan_obs_gapfill = load('%s/pan_obs_gapfill_good_stations' %workspace)
+	pan_mod = load('%s/pan_mod_good_stations' %workspace)
+	stats_basin = load('%s/calibration_regressionfit_basin_u56' %workspace)
+	for ibasin in xrange(0, 10):
+		cohere_obs_mod_basin = []
+		for istation in good_stations[ibasin]: #r2_60_stations[ibasin]:
+			# the PowerSpectrum method take the matrix as different segment, so shoule be a 1d array
+			panobs = pan_obs_gapfill[istation, :].flatten()
+			# panmod = pan_mod[istation, :].flatten()
+			panmod = pan_mod[istation, :].flatten() * stats_basin[ibasin, 0]
+			# Compute the coherence
+			cohere_obs_mod_basin.append(FFT.Coherence(panobs, panmod, sampling_frequency, 'linear')[1])
+
+		# store basin average
+		cohere_obs_mod_basin = vstack(cohere_obs_mod_basin)
+		cohere_obs_mod_basin.dump('%s/coherence_obs_mod_var_goodstation_r2_60_u56_%s' %(workspace, basinlongs[ibasin]))
+
+	return
+# Coherence_obs_mod_r260()
+# exit()
+def Plot_Coherence_Basin():
+
+	fig = plt.figure(figsize=(24, 18))
+	cohere = []
+	freq = Coherence_Frequency()
+	for ibasin in xrange(0, 10):
+		# cohere_basin = load('%s/coherence_obs_var_qc_station_%s' %(workspace, basinlongs[ibasin]))
+		# cohere_basin = load('%s/coherence_mod_var_goodstation_%s' %(workspace, basinlongs[ibasin]))
+		# cohere_basin = load('%s/coherence_obs_var_r2_60_station_%s' %(workspace, basinlongs[ibasin]))
+		cohere_basin = load('%s/coherence_mod_var_goodstation_r2_60_u56_%s' %(workspace, basinlongs[ibasin]))
+		cohere.append(cohere_basin)
+
+		## DRAW FIGURE---------------
+	 	ax = fig.add_subplot(3, 4, ibasin+1)
+		Plotting.CoherenceBasinPlot(ax, mean(cohere_basin, axis=0), sampling_frequency, freq, basinlongs[ibasin])
+
+	# for national average
+	ax = fig.add_subplot(3, 4, 11)
+	Plotting.CoherenceBasinPlot(ax, mean(vstack(cohere), axis=0), sampling_frequency, freq, 'Average')
+	ax.legend(bbox_to_anchor=(1.35, 0.5), loc='center left', fontsize=21)
+	fig.tight_layout()
+	plt.show()
+	return
+# Plot_Coherence_Basin()
+# exit()
+def Plot_Coherence_obs_mod():
+
+	fig = plt.figure(figsize=(24, 18))
+	cohere = []
+	freq = Coherence_Frequency()
+	for ibasin in xrange(0, 10):
+		cohere_basin = load('%s/coherence_obs_mod_var_goodstation_r2_60_u56_%s' %(workspace, basinlongs[ibasin]))
+		# cohere_basin = load('%s/coherence_obs_mod_var_goodstation_%s' %(workspace, basinlongs[ibasin]))
+		cohere.append(cohere_basin)
+
+		## DRAW FIGURE---------------
+	 	ax = fig.add_subplot(3, 4, ibasin+1)
+		# Plotting.CoherenceBasinPlot(ax, mean(cohere_basin, axis=0), sampling_frequency, freq, basinlongs[ibasin])
+
+		Plotting.Coherence_obs_mod_Plot(ax, mean(cohere_basin, axis=0), sampling_frequency, freq, basinlongs[ibasin])
+
+	# for national average
+	ax = fig.add_subplot(3, 4, 11)
+	# Plotting.CoherenceBasinPlot(ax, mean(vstack(cohere), axis=0), sampling_frequency, freq, 'Average')
+	Plotting.Coherence_obs_mod_Plot(ax, mean(vstack(cohere), axis=0), sampling_frequency, freq, 'Average')
+	fig.tight_layout()
+	plt.show()
+# Plot_Coherence_obs_mod()
+# exit()
 ##########################################################################
 # trend attribution analysis for pan evporation and penpan modelled PE
 ##########################################################################
 
-###==================================
-# Step1. Select good station: no missing years and missing months
-def Quality_Check_station():
-	"calculate the total number of missing records for each station"
-	flag_basins = []
-	for ibasin in xrange(0, 10):
-		flag = zeros((station_number[ibasin], 2))
-		for istation in xrange(0, station_number[ibasin]):
-			data = scipy.io.loadmat('%s/%s_AP.mat' %(datadir, ibasin+1))
-			# for a station to count it must have more than 80% of coverage for each year and for all variables for Epan calculation
-			for v in vars_penpan[:-2]:
-				ts = data[v][0, istation][0:tstep]
-
-				# Case1: If the whole series is 0, then throw away
-				if np.nansum(ts) == 0.0:
-					flag[istation, 0] = 1
-					flag[istation, 1] = 1
-					break
-				# # Case2: For every month, if the missing value is greater than the threshold 20 % then mask down, stricter than year
-				for year in xrange(styr, edyr+1):
-					for month in xrange(1, 13):
-						npoints_year = 31.0*(1-80.0/100.0)
-
-						count = np.isnan(ts[(dyears==year)&(dmonths==month)]).sum()
-
-						if count > int(npoints_year):
-							flag[istation, 0] = 1
-							flag[istation, 1] = 2
-							break
-
-		flag_basins.append(flag)
-
-	return flag_basins
-
-# station_flag = Quality_Check_station()
-# pickle.dump(station_flag, open('station_flag','wb'))
-
-def Quality_Check_station_pan():
-	"calculate the total number of missing records for each station"
-	flag_basins = []
-	for ibasin in xrange(0, 10):
-		flag = zeros((station_number[ibasin], 2))
-		for istation in xrange(0, station_number[ibasin]):
-			data = scipy.io.loadmat('%s/%s_AP.mat' %(datadir, ibasin+1))
-			# for a station to count it must have more than 80% of coverage for each year and for all variables for Epan calculation
-			ts = data['pan'][0, istation][0:tstep]
-			# Case1: If the whole series is 0, then throw away
-			if np.nansum(ts) == 0.0:
-				flag[istation, 0] = 1
-				flag[istation, 1] = 1
-				break
-			# # Case2: For every month, if the missing value is greater than the threshold 20 % then mask down, stricter than year
-			for year in xrange(styr, edyr+1):
-				for month in xrange(1, 13):
-					npoints_year = 31.0*(1-80.0/100.0)
-					count = np.isnan(ts[(dyears==year)&(dmonths==month)]).sum()
-					if count > int(npoints_year):
-						flag[istation, 0] = 1
-						flag[istation, 1] = 2
-						break
-
-		flag_basins.append(flag)
-
-	return flag_basins
-# station_pan_flag = Quality_Check_station_pan()
-# pickle.dump(station_pan_flag, open('station_pan_flag','wb'))
-
-## use the R square between pan evaporation and Epan to filter out some stations further
-def Compare_pan_vs_Epenpan(INPUT, pan):
-
-	test = Data(INPUT, 'cloud').penpan
-	res = pd.Series(pan, index=dates).resample('M', how='sum')
-	res2 = pd.Series(test, index=dates).resample('M', how='sum')
-	plt.scatter(res, res2)
-	mk = np.isnan(res)+np.isnan(res2)
-	# calculate R square
-	R = scipy.stats.mstats.pearsonr(res[mk==0], res2[mk==0])[0]
-	plt.title('%s' %(R**2))
-	plt.xlim([0, 500])
-	plt.ylim([0, 500])
-	plt.xlabel('observed')
-	plt.ylabel('penpan')
-	plt.show()
-	exit()
-
-	return
-
-###==================================
-# Step2. Gapfill the missing values in the selected stations
-def Gapfill(daily):
-	"return the array, not pandas object"
-	ts = pd.Series(daily, index=dates).fillna(method='pad').values
-	return ts
-
-## Step4. Calculate Epan trend attribution
 def generate_annual_trend_attribution_components(INPUT):
 
 	"""prepare all the trend attribution components"""
@@ -318,88 +552,378 @@ def Calculate_trend_attribution(forcing_ann):
 
 	return attribution
 
-##====================================================================
-# Run the step functions for spectral analysis
-##====================================================================
-# Coherence_Station()
-# Coherence_Station2Basin()
-# PlotCoherence()
-# PSD_Station2Basin()
-# PlotPSD()
+def Epenpan_trend_attribution():
 
-##====================================================================
-# Run the step functions for trend attribution analysis
-##====================================================================
-def Calculate_Pan():
-	lons = []
-	lats = []
-	Pan_obs = []
-	Pan_obs_gapfill = []
-	Pan_mod = []
+	att_stations = []
+	r2_60_stations = pickle.load(open('r2_60_stations_u56','rb'))
+	relatetable = load('%s/relatetable' %workspace)
+
 	for ibasin in xrange(0, 10):
-		for istation in good_stations[ibasin]:
+		for istation in relatetable[r2_60_stations[ibasin], 1]:
 			print ibasin, istation
 			data = scipy.io.loadmat('%s/%s_AP.mat' %(datadir, ibasin+1))
+
 			index = np.where(geoinfo[:, 0]==data['station_name'][0, istation])[0]
-			pan_obs = data['pan'][0, istation][0:tstep].flatten()
-			pan_obs_gapfill = Gapfill(data['pan'][0, istation][0:tstep].flatten())
+
 			## Prepare for the input data for Epan calculation
 			INPUT = {vars_penpan[i]: Gapfill(data[v][0, istation][0:tstep].flatten()) for i, v in enumerate(vars_penpan[:-2])}
 			INPUT['doy'] = doys.flatten()
 			INPUT['lat'] = geoinfo[index, 1]
 			INPUT['elev'] = geoinfo[index, 3]
 
-			## Step1. Calculate Epan and evaluation
-			pan_mod = Data(INPUT, 'cloud').penpan
-			## Step2. Calculate Epan Trend attribution
-			# forcing_ann = generate_annual_trend_attribution_components(INPUT)
-			# att = Calculate_trend_attribution(forcing_ann)
-
+			## Calculate Epan Trend attribution
+			forcing_ann = generate_annual_trend_attribution_components(INPUT)
+			att = Calculate_trend_attribution(forcing_ann)
 			# Collect the data and geoinfo for map showing
-			lons.append(geoinfo[index, 2])
-			lats.append(geoinfo[index, 1])
-			Pan_obs.append(pan_obs)
-			Pan_obs_gapfill.append(pan_obs_gapfill)
-			Pan_mod.append(pan_mod)
-			# R square
-			#
-			# print att
-	lons = vstack(lons)
-	lats = vstack(lats)
-	Pan_obs = vstack(Pan_obs)
-	Pan_obs_gapfill = vstack(Pan_obs_gapfill)
-	Pan_mod = vstack(Pan_mod)
-	lons.dump('%s/lons_good_stations' %workspace)
-	lats.dump('%s/lats_good_stations' %workspace)
-	Pan_obs.dump('%s/pan_obs_ts_good_stations' %workspace)
-	Pan_obs_gapfill.dump('%s/pan_obs_gapfill_good_stations' %workspace)
-	Pan_mod.dump('%s/pan_mod_good_stations' %workspace)
+			att_stations.append(att)
+
+	att_stations = vstack(att_stations)
+	att_stations.dump('%s/att_stations' %workspace)
+
 	return
 
-# Calculate_Pan()
+# Epenpan_trend_attribution()
+# exit()
+##====================================================================
+# Run the step functions for trend attribution analysis
+##====================================================================
+def Compare_pan_vs_Epenpan():
+	## Prepare the data for plotting
+	# pan_obs = load('%s/pan_obs_ts_good_stations' %workspace)
+	pan_obs_gapfill = load('%s/pan_obs_gapfill_good_stations' %workspace)
+	pan_mod = load('%s/pan_mod_good_stations_u56' %workspace)
 
-## Plot the
-# lons = load('%s/lons_good_stations' %workspace)
-# lats = load('%s/lats_good_stations' %workspace)
-# data = load('%s/pan_obs_ts_good_stations' %workspace)
-# data = nanmean(data, axis=1)
-# print data.shape
-# lons = []
-# lats = []
-# for ibasin in xrange(0, 10):
-# 	for istation in xrange(0, station_number[ibasin]):
-# 		data = scipy.io.loadmat('%s/%s_AP.mat' %(datadir, ibasin+1))
-# 		index = np.where(geoinfo[:, 0]==data['station_name'][0, istation])[0]
-# 		lons.append(geoinfo[index, 2])
-# 		lats.append(geoinfo[index, 1])
-# lons = vstack(lons)
-# lats = vstack(lats)
-# lons.dump('%s/lons_all_stations' %workspace)
-# lats.dump('%s/lats_all_stations' %workspace)
-lons = load('%s/lons_all_stations' %workspace)
-lats = load('%s/lats_all_stations' %workspace)
-Plotting.Mapshow(ones(lons.shape), lons, lats, 0, 10, plt.cm.jet, None, None, figdir, None)
+	stats_basin = load('%s/calibration_regressionfit_basin_u56' %workspace)
+	r2_60_stations = pickle.load(open('r2_60_stations_u56','rb'))
+	r2_60 = hstack(r2_60_stations)
 
+	# station average
+	# pan_obs_gapfill = mean(vstack([daily2monthly(pan_obs_gapfill[istation, :]) for istation in xrange(0, 236)]), axis=0)
+	# pan_mod = mean(vstack([daily2monthly(pan_mod[istation, :]) for istation in xrange(0, 236)]), axis=0)
+	# all stations all monthly time step
+	# panobs = pan_obs_gapfill[r2_60,:]
+	# panobs = vstack([daily2monthly(panobs[istation, :]) for istation in xrange(0, len(r2_60))]).flatten()
+	# panmod = []
+	# for ibasin in xrange(0, 10):
+	# 	for istation in r2_60_stations[ibasin]:
+	# 		panmod.append(daily2monthly(pan_mod[istation, :]) * stats_basin[ibasin, 0]) #  + stats_basin[ibasin, 1]
+	# panmod = vstack(panmod).flatten()
+	# stats = scipy.stats.mstats.linregress(panobs, panmod)[:]
+	# rmse = np.sqrt(mean((panmod-panobs)**2))
+
+	## annual trend
+	# all stations
+	# panobs = vstack([TrendAnalysis(daily2annual(pan_obs_gapfill[istation, :])).ThSenTrend() * 365.0 for istation in xrange(0, 236)]).flatten()
+	# panmod = vstack([TrendAnalysis(daily2annual(pan_mod[istation, :])).ThSenTrend() * 365.0 for istation in xrange(0, 236)]).flatten()
+	# only high agreement stations
+
+	panobs = pan_obs_gapfill[r2_60,:]
+	panmod = []
+	for ibasin in xrange(0, 10):
+		for istation in r2_60_stations[ibasin]:
+			panmod.append(pan_mod[istation, :].flatten() * stats_basin[ibasin, 0]) # + stats_basin[ibasin, 1])
+	panmod = vstack(panmod)
+	panobs = vstack([TrendAnalysis(daily2annual(panobs[istation, :])).ThSenTrend() * 365.0 for istation in xrange(0, len(r2_60))]).flatten()
+	panmod = vstack([TrendAnalysis(daily2annual(panmod[istation, :])).ThSenTrend() * 365.0 for istation in xrange(0, len(r2_60))]).flatten()
+	#
+	# mk_same_sign = np.where((panobs<0)&(panmod<0))[0]
+	# plt.scatter(panobs, panmod, s=100, marker='+', c='lightCoral', linewidths=2, alpha=0.2) #
+	fig = plt.figure(figsize=(8,8))
+	plt.scatter(panobs, panmod, s=120, c='green', alpha=0.7) #
+
+	# calculate R square
+	R = scipy.stats.mstats.pearsonr(panobs, panmod)[0]
+	min = -20
+	max = 20
+	plt.xlim([min, max])
+	plt.ylim([min, max])
+	plt.plot([min, max], [min, max], 'k--', linewidth=1.5)
+	plt.xlabel('Observed (mm/yr/yr)', fontsize=21)
+	plt.ylabel('Modelled (mm/yr/yr)', fontsize=21)
+	plt.axes().set_aspect('equal')
+	plt.axes().tick_params(axis='y', labelsize=19)
+	plt.axes().tick_params(axis='x', labelsize=19)
+	# plt.title('Monthly averaged pan evaporation (all stations)', fontsize=22, y=1.05)
+	# plt.text(2, 18, r'$R^2$ = %0.3f' %(R**2), fontsize=20)
+	plt.text(-18, 16, r'$R^2$ = %0.3f' %(R**2), fontsize=24)
+	plt.title('Annual trend (all stations)', fontsize=16, y=1.03)
+	plt.show()
+	return
+
+# Compare_pan_vs_Epenpan()
+# exit()
+def Calibrate_Epan_mod():
+	# Calibrate the modelled pan evaporation for each basin
+	pan_obs_gapfill = load('%s/pan_obs_gapfill_good_stations' %workspace)
+	pan_mod = load('%s/pan_mod_good_stations_u56' %workspace)
+	stats = [scipy.stats.mstats.linregress(pan_mod[istation, :], pan_obs_gapfill[istation, :])[:] for istation in xrange(0, 236)]
+	stats = vstack(stats)
+	# relatetable = []
+	# for ibasin in xrange(0, 10):
+	# 	for istation in good_stations[ibasin]:
+	# 		relatetable.append((ibasin,istation))
+	# relatetable = vstack(relatetable)
+	# relatetable.dump('%s/relatetable' %workspace)
+	relatetable = load('%s/relatetable' %workspace)
+	stats_basin = []
+	r2_60_stations = []
+	for ibasin in xrange(0, 10):
+		stations = np.where(relatetable[:, 0]==ibasin)[0]
+		index = np.where(stats[stations, 2]**2>0.6)[0]
+		r2_60_stations.append(stations[index])
+
+		panobs = vstack([daily2monthly(pan_obs_gapfill[istation, :]) for istation in stations[index]]).flatten()
+		panmod = vstack([daily2monthly(pan_mod[istation, :]) for istation in stations[index]]).flatten()
+		stats_basin.append(scipy.stats.mstats.linregress(panmod, panobs)[:])
+	stats_basin = vstack(stats_basin)
+	stats_basin.dump('%s/calibration_regressionfit_basin_u56' %workspace)
+	pickle.dump(r2_60_stations, open('r2_60_stations_u56', 'wb'))
+	return
+
+# Calibrate_Epan_mod()
+# exit()
+def Plot_Station_Data():
+
+	stats_basin = load('%s/calibration_regressionfit_basin_u56' %workspace)
+	r2_60_stations = pickle.load(open('r2_60_stations_u56','rb'))
+	r2_60 = hstack(r2_60_stations)
+	lons = load('%s/lons_good_stations' %workspace)[r2_60, :]
+	lats = load('%s/lats_good_stations' %workspace)[r2_60, :]
+
+	## Prepare the data for plotting
+	# 1. mean
+	# min = 0
+	# max = 10
+	# title = 'daily average'
+	# unit = '(mm/d)'
+	# figname = 'ave'
+	# pan_obs_gapfill = mean(load('%s/pan_obs_gapfill_good_stations' %workspace), axis=1)
+	# pan_mod = mean(load('%s/pan_mod_good_stations' %workspace), axis=1)
+
+	# 2. inter annual variability
+	# min = 0
+	# max = 20
+	# title = 'interannual coefficient of variability'
+	# unit = '(%)'
+	# figname = 'cv'
+	# pan_obs_gapfill = load('%s/pan_obs_gapfill_good_stations' %workspace)
+	# pan_obs_gapfill_ann = vstack([daily2annual(pan_obs_gapfill[istation, :]) for istation in xrange(0, len(lons))])
+	# pan_obs_gapfill = scipy.stats.variation(pan_obs_gapfill_ann, axis=1) * 100.0
+	#
+	# pan_mod = load('%s/pan_mod_good_stations' %workspace)
+	# pan_mod_ann = vstack([daily2annual(pan_mod[istation, :]) for istation in xrange(0, len(lons))])
+	# pan_mod = scipy.stats.variation(pan_mod_ann, axis=1) * 100.0
+	#
+	# ##----------------------------------Figure Plotting-----------------------------------------
+	# Plotting.Mapshow(pan_obs_gapfill, lons, lats, 50, min, max, plt.cm.jet, 'Observed pan evaporation %s' %title, None, unit, figdir, 'pan_obs_%s.png' % figname)
+	# Plotting.Mapshow(pan_mod, lons, lats, 50, min, max, plt.cm.jet, 'Modelled pan evaporation %s' %title, None, unit, figdir, 'pan_mod_%s.png' % figname)
+
+	# 3. annual trend
+	# min = -25
+	# max = 25
+	# title = 'annual trend'
+	# unit = '(mm/yr/yr)'
+	# figname = 'trend'
+
+	# pan_obs_gapfill = load('%s/pan_obs_gapfill_good_stations' %workspace)[r2_60,:]
+	# panobs_slp = vstack([TrendAnalysis(daily2annual(pan_obs_gapfill[istation, :])).ThSenTrend() * 365.0 for istation in xrange(0, len(r2_60))])
+	# panobs_p = vstack([TrendAnalysis(daily2annual(pan_obs_gapfill[istation, :])).KendallTau() for istation in xrange(0, len(r2_60))])
+	# pan_mod = load('%s/pan_mod_good_stations' %workspace)
+	# panmod = []
+	# for ibasin in xrange(0, 10):
+	# 	for istation in r2_60_stations[ibasin]:
+	# 		panmod.append(pan_mod[istation, :].flatten() * stats_basin[ibasin, 0]) # + stats_basin[ibasin, 1])
+	# panmod = vstack(panmod)
+	# panmod_p = vstack([TrendAnalysis(daily2annual(panmod[istation, :])).KendallTau() for istation in xrange(0, len(r2_60))])
+	# panmod_slp = vstack([TrendAnalysis(daily2annual(panmod[istation, :])).ThSenTrend() * 365.0 for istation in xrange(0, len(r2_60))])
+
+	# significance
+	# mk_sign = np.where((panobs_p<=0.05)&(panmod_p<=0.05))[0]
+	# mk_sign = np.where(panobs_p<=0.05)[0]
+	# trend consistency
+	# mk_same_sign = np.where(((panobs_slp<0)&(panmod_slp<0))|((panobs_slp>0)&(panmod_slp>0)))[0]
+	# mk = intersect1d(mk_significant, mk_same_sign)
+	# print r2_60[mk]
+	# ##----------------------------------Figure Plotting-----------------------------------------
+
+	# Plotting.Mapshow(panobs_slp[panobs_p>0.05], lons[panobs_p>0.05], lats[panobs_p>0.05], 50, 0.7, min, max, plt.cm.seismic, 'Observed pan evaporation %s' %title, 'p>0.05', unit, figdir, 'pan_obs_%s_r2_60.png' % figname)
+	# plt.hold(True)
+	# Plotting.Mapshow(panobs_slp[panobs_p<=0.05], lons[panobs_p<=0.05], lats[panobs_p<=0.05], 150, 0.7, min, max, plt.cm.seismic, 'Observed pan evaporation %s' %title, 'p<=0.05', unit, figdir, 'pan_obs_%s_r2_60.png' % figname)
+
+	# Plotting.Mapshow(panmod_slp[panmod_p>0.05], lons[panmod_p>0.05], lats[panmod_p>0.05], 50, 0.7, min, max, plt.cm.seismic, 'Modelled pan evaporation %s' %title, 'p>0.05', unit, figdir, 'pan_obs_%s_r2_60.png' % figname)
+	# plt.hold(True)
+	# Plotting.Mapshow(panmod_slp[panmod_p<=0.05], lons[panmod_p<=0.05], lats[panmod_p<=0.05], 150, 0.7, min, max, plt.cm.seismic, 'Modelled pan evaporation %s' %title, 'p<=0.05', unit, figdir, 'pan_obs_%s_r2_60.png' % figname)
+	#
+	# plt.legend(loc=3, prop={'size': 18})
+	# plt.show()
+
+	## 3.5 trend significance
+	# min = 0
+	# max = 1
+	# title = 'trend significance'
+	# unit = '(mm/yr/yr)'
+	# figname = 'pvalue'
+	# # pan_obs_gapfill = load('%s/pan_obs_gapfill_good_stations' %workspace)
+	# # pan_obs_gapfill = vstack([TrendAnalysis(daily2annual(pan_obs_gapfill[istation, :])).KendallTau() for istation in xrange(0, len(lons))])
+	#
+	# pan_mod = load('%s/pan_mod_good_stations' %workspace)
+	# pan_mod = vstack([TrendAnalysis(daily2annual(pan_mod[istation, :])).KendallTau() for istation in xrange(0, len(lons))])
+	# #
+	# # ##----------------------------------Figure Plotting-----------------------------------------
+	# Plotting.Mapshow('white', lons, lats, 50, min, max, plt.cm.seismic, 'Modelled pan evaporation %s' %title, None, unit, figdir, 'pan_mod_%s.png' % figname)
+	# plt.hold(True)
+	# Plotting.Mapshow('black', lons[pan_mod<0.1], lats[pan_mod<0.1], 50, min, max, plt.cm.seismic, 'Modelled pan evaporation %s' %title, None, unit, figdir, 'pan_mod_%s.png' % figname)
+	# savefig('%s/pan_mod_%s.png' %(figdir, figname))
+
+
+	# 4. trend attribution
+	# min = -10
+	# max = 10
+	unit = ''
+	# figname = 'trend_att_'
+	# vars = ['Tair', 'Rn', 'Wind', 'Ea']
+	att_stations = load('%s/att_stations' %workspace)
+	#
+	# # ##----------------------------------Figure Plotting-----------------------------------------
+	# [Plotting.Mapshow(att_stations[:, i]*365, lons, lats, 50, 1, min, max, plt.cm.seismic, 'Epan trend attribution to %s' %v, None, unit, figdir, 'pan_mod_trend_att_%s.png' % v) for i, v in enumerate(vars)]
+
+	# # T E+U R
+	att_rgb = np.empty((att_stations.shape[0], 3))
+	att_rgb[:, 0] = att_stations[:, 0] + att_stations[:, 3]
+	att_rgb[:, 1] = att_stations[:, 2]
+	att_rgb[:, 2] = att_stations[:, 1]
+
+	attmag = abs(att_rgb)
+	maxatt = np.max(abs(att_rgb), axis=1).reshape(att_stations.shape[0], 1)
+	att_rgb_norm = attmag / maxatt
+
+	# condition
+	pan_obs_gapfill = load('%s/pan_obs_gapfill_good_stations' %workspace)[r2_60,:]
+	panobs_slp = vstack([TrendAnalysis(daily2annual(pan_obs_gapfill[istation, :])).ThSenTrend() * 365.0 for istation in xrange(0, len(r2_60))])
+
+	pan_mod = load('%s/pan_mod_good_stations' %workspace)
+	panmod = []
+	for ibasin in xrange(0, 10):
+		for istation in r2_60_stations[ibasin]:
+			panmod.append(pan_mod[istation, :].flatten() * stats_basin[ibasin, 0]) # + stats_basin[ibasin, 1])
+	panmod = vstack(panmod)
+	panmod_p = vstack([TrendAnalysis(daily2annual(panmod[istation, :])).KendallTau() for istation in xrange(0, len(r2_60))])
+	panmod_slp = vstack([TrendAnalysis(daily2annual(panmod[istation, :])).ThSenTrend() * 365.0 for istation in xrange(0, len(r2_60))])
+	# trend consistency
+	mk_same_sign = np.where(((panobs_slp<0)&(panmod_slp<0))|((panobs_slp>0)&(panmod_slp>0)))[0]
+	index_insign = np.where(panmod_p>0.05)[0]
+	index_sign = np.where(panmod_p<=0.05)[0]
+	mk = intersect1d(mk_same_sign,index_sign)
+
+	# mk_up = intersect1d(np.where((panobs_slp>0)&(panmod_slp>0))[0], index_sign)
+	# mk_dw = intersect1d(np.where((panobs_slp<0)&(panmod_slp<0))[0], index_sign)
+
+	mk_up = intersect1d(np.where((panobs_slp>0)&(panmod_slp<0))[0], index_sign)
+	mk_dw = intersect1d(np.where((panobs_slp<0)&(panmod_slp>0))[0], index_sign)
+
+
+	# ##----------------------------------Figure Plotting-----------------------------------------
+	## p value as big and small
+	# Plotting.Mapshow_RGB(att_rgb_norm[index_insign, :], lons[index_insign], lats[index_insign], 50, 0.4, 'Epan trend attribution : 1961-2001', 'p>0.05', unit)
+	# plt.hold(True)
+	# Plotting.Mapshow_RGB(att_rgb_norm[index_sign, :], lons[index_sign], lats[index_sign], 150, 0.6, 'Epan trend attribution : 1961-2001', 'p<=0.05', unit)
+	## only significant point
+	# Plotting.Mapshow_RGB(att_rgb_norm[mk, :], lons[mk], lats[mk], 150, 0.6, 'Epan trend attribution : 1961-2001', 'p<=0.05', unit)
+	## significant with up and down triangle
+	Plotting.Mapshow_RGB(att_rgb_norm[mk_up, :], lons[mk_up], lats[mk_up], 180, 0.8, '^', 'Epan trend attribution : 1961-2001', 'increase', unit)
+	plt.hold(True)
+	Plotting.Mapshow_RGB(att_rgb_norm[mk_dw, :], lons[mk_dw], lats[mk_dw], 180, 0.8, 'v', 'Epan trend attribution : 1961-2001', 'decrease', unit)
+	plt.legend(loc=4, prop={'size': 14})
+	plt.show()
+	# savefig('%s/pan_mod_trend_att_%s.png' %(figdir, figname))
+	return
+
+Plot_Station_Data()
 exit()
-# Plotting.Mapshow(data, lons, lats, 0, 10, plt.cm.jet, None, None, figdir, None)
+def Barplot_trend_attribution_basin():
+
+	## Read trend attribution data
+	vars = ['Tair', 'Rn', 'Wind', 'Ea']
+	stats_basin = load('%s/calibration_regressionfit_basin_u56' %workspace)
+	r2_60_stations = pickle.load(open('r2_60_stations_u56','rb'))
+	r2_60 = hstack(r2_60_stations)
+	relatetable = load('%s/relatetable' %workspace)
+	att_stations = load('%s/att_stations' %workspace)
+
+	# condition
+	pan_obs_gapfill = load('%s/pan_obs_gapfill_good_stations' %workspace)[r2_60,:]
+	panobs_slp = vstack([TrendAnalysis(daily2annual(pan_obs_gapfill[istation, :])).ThSenTrend() * 365.0 for istation in xrange(0, len(r2_60))])
+
+	pan_mod = load('%s/pan_mod_good_stations' %workspace)
+	panmod = []
+	for ibasin in xrange(0, 10):
+		for istation in r2_60_stations[ibasin]:
+			panmod.append(pan_mod[istation, :].flatten() * stats_basin[ibasin, 0]) # + stats_basin[ibasin, 1])
+	panmod = vstack(panmod)
+	panmod_p = vstack([TrendAnalysis(daily2annual(panmod[istation, :])).KendallTau() for istation in xrange(0, len(r2_60))])
+	panmod_slp = vstack([TrendAnalysis(daily2annual(panmod[istation, :])).ThSenTrend() * 365.0 for istation in xrange(0, len(r2_60))])
+	# trend consistency
+	mk_same_sign = np.where(((panobs_slp<0)&(panmod_slp<0))|((panobs_slp>0)&(panmod_slp>0)))[0]
+	index_insign = np.where(panmod_p>0.05)[0]
+	index_sign = np.where(panmod_p<=0.05)[0]
+	mk = intersect1d(mk_same_sign,index_sign)
+	mask = empty((att_stations.shape[0], 4))
+	mask.fill(np.nan)
+	mask[mk,:] = 1
+	att_stations = att_stations*mask
+
+	ist = 0
+	att_plot = []
+	for ibasin in xrange(0, 10):
+		att_basin = []
+		for istation in relatetable[r2_60_stations[ibasin], 1]:
+			att_basin.append(att_stations[ist, :])
+			ist = ist + 1
+		att_plot.append(nanmean(att_basin, axis=0))
+	att_plot = vstack(att_plot) * 365
+
+	## Initialize
+	col = ['red', 'blue', 'DarkTurquoise', 'green']
+	stackbase_positive = array([0.0]*10)
+	stackbase_negative = array([0.0]*10)
+
+	## DRAW FIGURE---------------
+	fig, ax = plt.subplots(1, 1, figsize=(16, 7))
+	ax.yaxis.grid(True)
+	width = 0.6
+	bar_positions = np.arange(10)
+	for i in xrange(0, 4):
+		stackbase_positive = Plotting.Stacked_Bar(ax, att_plot[:, i], width, bar_positions, stackbase_positive, col[i], vars[i], 'positive',0.7)
+		stackbase_negative = Plotting.Stacked_Bar(ax, att_plot[:, i], width, bar_positions, stackbase_negative, col[i], vars[i], 'negative',0.7)
+
+
+	# Set up xaxis
+	plt.xlim([0, 10.2])
+	ax.set_xticks(bar_positions + width)  # add xtick
+	ax.set_xticklabels(basinlongs, fontsize=24, fontweight='bold', rotation=30)
+	ax.tick_params(axis='x', length=0) # leave space between pad pad = 10
+	# Set up yaxis
+	ax.set_ylabel('[mm/yr/yr]', fontsize=24, fontweight='bold')
+	ax.tick_params(axis='y', labelsize=24)
+
+	# make the top and right axes invisible
+	ax.spines['top'].set_visible(False); ax.spines['right'].set_visible(False); ax.spines['bottom'].set_visible(False)
+	ax.get_xaxis().tick_bottom(); ax.get_yaxis().tick_left()
+
+	# add the direction text
+	# ymin, ymax = ax.get_ylim()
+	# ax.text(0.3, ymax-0.9*(ymax-ymin), "North", fontsize=25, fontweight='bold')
+	# ax.text(4.4, ymax-0.9*(ymax-ymin), "South", fontsize=25, fontweight='bold')
+
+	# add legend below
+	lgd = plt.legend(loc='upper right', fontsize=20)
+	savefig('%s/mod_trend_attribution_basin_barplot.png' %figdir, bbox_extra_artists=(lgd, ), bbox_inches='tight')
+	plt.show()
+
+	return
+# Barplot_trend_attribution_basin()
+
+
+
+
 

@@ -11,11 +11,10 @@ class Data:
 
 		# Define the incoming grid data variables
 		self.Tair = INPUT['tavg']
-		self.Tmax = INPUT['tmax']
-		self.Tmin = INPUT['tmin']
-		self.Pres = INPUT['p']
-		# self.RH = INPUT['rh']
-		self.e = self.Convert_Unit_e(INPUT['ea'])    # vapor pressure: hpa
+		self.Tmin = INPUT['tmax']
+		self.Tmax = INPUT['tmin']
+		self.Pres = self.Convert_Unit_Pres(INPUT['p'])
+		self.e = self.Convert_Unit_Pres(INPUT['ea'])    # vapor pressure: hpa
 		self.Wind = INPUT['wind']  # Wind: m/s
 		# self.sunhour = INPUT['sun']  # sunhour: hour
 		self.CF = self.Convert_Unit_CF(INPUT['tc'])
@@ -64,14 +63,6 @@ class Data:
 
 		# self.DELTA = 4098 * 0.6108 * np.exp((17.27 * self.Tmean) / (237.3 + self.Tmean)) / (237.3 + self.Tmean) ** 2
 		self.DELTA = 4098 * self.estar / (237.3 + self.Tmean) ** 2
-
-		return
-
-	def Calculate_Rnet(self):
-		"Compute Rnet with longwave downward and shortwave downward radiation data"
-		albedo = 0.23
-		stefan_b = 4.903e-9  # [MJ K-4 m-2 day-1]
-		self.Rn = (1 - albedo) * self.SWin + self.LWin - stefan_b * (self.Tair+273.16)**4
 
 		return
 
@@ -136,8 +127,8 @@ class Data:
 
 		stefan_b = 4.903e-9  # [MJ K-4 m-2 day-1]
 		emissivity = 1
-		# self.LWnet = stefan_b * ((self.Tmax+273.16)**4 + (self.Tmin+273.16)**4) / 2.0 * (0.34-0.14 * np.sqrt(self.e)) * (1.35 * self.SWin/self.Rso - 0.35)
-		self.LWnet = stefan_b * (self.Tair+273.16)**4 * (0.34-0.14 * np.sqrt(self.e)) * (1.35 * self.SWin/self.Rso - 0.35)
+		self.LWnet = stefan_b * ((self.Tmax+273.16)**4 + (self.Tmin+273.16)**4) / 2.0 * (0.34-0.14 * np.sqrt(self.e)) * (1.35 * self.SWin/self.Rso - 0.35)
+		# self.LWnet = stefan_b * (self.Tair+273.16)**4 * (0.34-0.14 * np.sqrt(self.e)) * (1.35 * self.SWin/self.Rso - 0.35)
 		self.PDLWnet_PDTair = - 4 * stefan_b * (self.Tair+273.16)**3 * (0.34-0.14 * np.sqrt(self.e)) * (1.35 * self.SWin/self.Rso - 0.35)
 
 		return
@@ -152,16 +143,11 @@ class Data:
 	def Calculate_Gamma(self):
 
 		cp = 1.013   # Specific heat of moist air at constant pressure [kJ kg-1 C-1]
-		self.lv = 2.501 - 0.002361 * self.Tair  # Latent heat vapor
+		self.lv = 2.501 - 0.002361 * self.Tair  # Latent heat vapor (MJ/kg)
 		self.gamma = ((cp * self.Pres) / (0.622 * self.lv)) * 10 ** (-3)
-
 		return self.gamma
 
 	## Convert unit
-	# kelvin to degree
-	def Convert_Unit_Temp(self, input):
-		data = input - 273.16
-		return data
 
 	# W/m2 to MJ/m2/day
 	def Convert_Unit_Rad(self, input):
@@ -170,12 +156,7 @@ class Data:
 		return data
 
 	# pressure: hpa to kpa
-
 	def Convert_Unit_Pres(self, input):
-		data = input / 10.0
-		return data
-
-	def Convert_Unit_e(self, input):
 		data = input / 10.0
 		return data
 
@@ -188,7 +169,7 @@ class Data:
 		return data
 
 	def Convert_Unit_CF(self, input):
-		data = input / 100.0
+		data = input / 10.0
 		return data
 
 	## Calculation for each components
@@ -203,11 +184,11 @@ class Data:
 	def Penman(self):
 
 		# Hydrology Book
-		PET_R = (self.DELTA / (self.DELTA + self.gamma)) * self.Rn / self.lv
+		PET_R = (self.DELTA / (self.DELTA + self.gamma)) * self.Rn_pan / self.lv
 		PET_A = (self.gamma / (self.DELTA + self.gamma)) * ((6.43 * (1 + 0.536 * self.Wind) * self.vpd) / self.lv)
-		self.PET_Penman = PET_R + PET_A
+		penman = PET_R + PET_A
 
-		return
+		return penman
 
 	def Penpan(self):
 
@@ -215,11 +196,15 @@ class Data:
 
 		# These parameters are from Yang 2012
 		coeff_hq = 5  # for D20 pan
-		f_pan_u = 2.6 * (1 + 0.536 * self.Wind)
-		# Df_pan_u = 2.6 * 0.536
+		# f_pan_u = 2.6 * (1 + 0.536 * self.Wind)
 		# Beijing experiment for vapor transfer function
-		# f_pan_u = 5.4 * (1 + 0.73 * self.Wind)
+		# f_pan_u = 5.4 * (1 + 0.73 * self.Wind)/self.lv
 		# f_pan_u = 1.201 + 1.621 * self.Wind
+		f_pan_u = 1.313 + 1.381 * self.Wind
+		# f_pan_u = 2.626 + 1.381 * self.Wind
+		# f_pan_u = 0.35*(1+9.8e-3 * self.Wind)
+
+		# f_pan_u = 1.39e-8*(1+1.35 * self.Wind)
 
 		PET_R = self.DELTA/(self.DELTA + coeff_hq * self.gamma) * self.Rn_pan / self.lv
 		PET_A = coeff_hq * self.gamma/(self.DELTA + coeff_hq * self.gamma) * f_pan_u * self.vpd
@@ -227,6 +212,22 @@ class Data:
 
 		return
 
+	def Penpan_u2(self, a, b):
+
+		"ET_type = D20 Pan Evaporation"
+
+		# These parameters are from Yang 2012
+		coeff_hq = 5  # for D20 pan
+		# f_pan_u = 2.6 * (1 + 0.536 * self.Wind)
+		# Beijing experiment for vapor transfer function
+		# f_pan_u = 1.313 + 1.381 * self.Wind
+		f_pan_u = a + b * self.Wind
+
+		PET_R = self.DELTA/(self.DELTA + coeff_hq * self.gamma) * self.Rn_pan / self.lv
+		PET_A = coeff_hq * self.gamma/(self.DELTA + coeff_hq * self.gamma) * f_pan_u * self.vpd / self.lv
+		penpan = PET_R + PET_A
+
+		return penpan
 
 ## for original backup
 # self.Wind = self.Convert_Unit_Wind(INPUT['wnd10m'])
