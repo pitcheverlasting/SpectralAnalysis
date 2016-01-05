@@ -12,19 +12,19 @@ from PET_Library import Data
 from PETREND import TrendAnalysis, TrendAttribution
 # #=============================path================================
 datadir = '/home/water5/lpeng/script/PROJECT/pan_evaporation_china/original'
-workspace = '/home/water5/lpeng/script/PROJECT/pan_evaporation_china/workspace'
-figdir = '/home/water5/lpeng/Figure/pan_spectral/trend/'
+workspace = '/home/water5/lpeng/script/PROJECT/pan_evaporation_china/workspace/201601'
+figdir = '/home/water5/lpeng/Figure/pan_spectral/sunhours'
 ##=============================variable============================
 vars = ['time', 'p', 'tavg', 'tmin', 'tmax', 'ea', 'rh', 'tc', 'lc', 'wind', 'ts', 'sun', 'rain', 'pan', 'vpd',  'estavg', 'rh_test']  # time 1,2,3 year, month, day # Note that original data is multiplied by 10 from the normal unit. This process data devide 10 so that it becomes the original unit
 varlongs = ['time', 'daily averaged pressure [hpa]', 'daily averaged air temperature [degree]', 'daily minimum air temperature [degree]', 'daily maximum air temperature [degree]', 'daily averaged vapor pressure [hpa]', 'daily averaged relative humidity [%]', 'daily averaged total cloud cover', 'daily averaged low cloud cover', 'daily averaged wind speed [m/s]', 'daily averaged surface temperature(at 0cm level) [degree]', 'daily averaged sunshine hour [hr]', 'daily averaged rainfall [mm]', 'daily averaged pan evaporation [mm]', 'daily averaged vapor pressure deficit [hpa]', 'daily saturated vapor pressure using daily averaged air temperature [hpa]', 'daily averaged relative humidity calculated [%]']
-# varname = ["Air Temperature", "Net Radiation", "Gamma", "Slope of Saturation Vapor Pressure Curve", "Vapor Pressure Deficit", "Wind", "Latent Heat Constant", "Saturated Vapor Pressure", "Humidity", 'Outgoing Shortwave Radiation', 'Outgoing Longwave Radiation']
 
-variables = ['tavg', 'sun', 'wind', 'ea', 'tc', 'ts', 'vpd', 'rain']
-vars_penpan = ['tavg', 'tmax', 'tmin', 'p', 'ea', 'wind', 'tc', 'lat', 'elev'] #'sun'
-basinlongs=['Songhuajiang','Liaohe','Northwestern','Haihe','Yellow', 'Yangtze','Huaihe','Southeastern','Southwestern','Pearl']
+variables = ['tavg', 'sun', 'wind', 'ea', 'tc', 'vpd']
+vars_penpan = ['tavg', 'tmax', 'tmin', 'p', 'ea', 'wind', 'sun', 'lat', 'elev']  # 'tc'
+basinlongs=['Songhuajiang', 'Liaohe', 'Northwestern', 'Haihe', 'Yellow', 'Yangtze', 'Huaihe', 'Southeastern', 'Southwestern', 'Pearl']
 geoinfo = load('%s/station_geoinfo' %workspace)
 station_number = load('%s/basin_station_number' %workspace)
-# Dimensions
+
+## Time
 styr = 1961
 edyr = 2001
 stdy = datetime.datetime(styr, 1, 1)
@@ -33,10 +33,10 @@ dates = pd.date_range(stdy, eddy, freq='D')
 tstep = len(dates)
 dyears = dates.year
 dmonths = dates.month
-doys = vstack([dates[i].timetuple().tm_yday for i in xrange(0, tstep)])
+doys = vstack([dates[i].timetuple().tm_yday for i in xrange(0, tstep)])  # julian day
 
 ## quality check using data availability as criteria
-station_flag = pickle.load(open('station_flag','rb'))
+station_flag = pickle.load(open('station_sunhours_80_flag','rb'))
 station_qc = [np.where(station_flag[ibasin][:, 0]==0)[0] for ibasin in xrange(0, 10)]
 station_pan_flag = pickle.load(open('station_pan_80_flag','rb'))
 station_pan_qc = [np.where(station_pan_flag[ibasin][:, 0]==0)[0] for ibasin in xrange(0, 10)]
@@ -77,11 +77,13 @@ def Quality_Check_station():
 		flag_basins.append(flag)
 
 	return flag_basins
+
 # station_flag = Quality_Check_station()
-# pickle.dump(station_flag, open('station_flag','wb'))
+# pickle.dump(station_flag, open('station_sunhours_80_flag', 'wb'))
+# exit()
 
 # Step1.2 Select good pan station
-def Quality_Check_station_pan():
+def Quality_Check_station_pan(percentage):
 	"calculate the total number of missing records for each station"
 	flag_basins = []
 	for ibasin in xrange(0, 10):
@@ -98,7 +100,7 @@ def Quality_Check_station_pan():
 			# # Case2: For every month, if the missing value is greater than the threshold 20 % then mask down, stricter than year
 			for year in xrange(styr, edyr+1):
 				for month in xrange(1, 13):
-					npoints_year = 31.0*(1-60.0/100.0)
+					npoints_year = 31.0*(1-percentage/100.0)
 					count = np.isnan(ts[(dyears==year)&(dmonths==month)]).sum()
 					if count > int(npoints_year):
 						flag[istation, 0] = 1
@@ -107,10 +109,12 @@ def Quality_Check_station_pan():
 
 		flag_basins.append(flag)
 
+	pickle.dump(station_pan_flag, open('station_pan_%2d_flag','wb') % percentage)
+
 	return flag_basins
 
-# station_pan_flag = Quality_Check_station_pan()
-# pickle.dump(station_pan_flag, open('station_pan_60_flag','wb'))
+# station_pan_flag = Quality_Check_station_pan(60)
+# exit()
 
 station_list_names = ['_all_stations', '_good_stations', '_for_stations', '_pan_stations']
 station_lists = [station_number, good_stations, station_qc, station_pan_qc]
@@ -131,16 +135,19 @@ def Get_Selected_Station_Locations(j):
 	lats = vstack(lats)
 	lons.dump('%s/lons%s' %(workspace, station_list_names[j]))
 	lats.dump('%s/lats%s' %(workspace, station_list_names[j]))
+
 	return
 
 def Plot_Selected_Station_Locations(j):
 	lons = load('%s/lons%s' %(workspace, station_list_names[j]))
 	lats = load('%s/lats%s' %(workspace, station_list_names[j]))
-	Plotting.Mapshow(cols[j], lons, lats, 45, None, None, None, 'Qualified pan evaporation met stations (%s)' %len(lons), 'Met Stations', '', figdir, '%s_stations_scattermap.png' %fignames[j])
+	Plotting.Mapshow(cols[j], lons, lats, 45, 0.5, None, None, None, 'Qualified pan evaporation met stations (%s)' %len(lons), 'Met Stations', '', figdir, '%s_stations_scattermap.png' %fignames[j])
+
 	return
 
 # Get_Selected_Station_Locations(1)
 # Plot_Selected_Station_Locations(1)
+# exit()
 
 ###====================================================================
 # Step1.4 Gapfill the missing values in the selected stations
@@ -158,7 +165,9 @@ def daily2monthly(daily):
 	return ts
 ###====================================================================
 
-## parameterization
+##########################################################################
+# ## parameterization
+##########################################################################
 def KGE(model, obs):
 
 	rho = scipy.stats.pearsonr(model, obs)
@@ -193,6 +202,7 @@ def Calibrate_fq():
 	bnd = ((0, None), (0, None))
 	test = minimize(Function, array([1.313, 1.381]), bounds=bnd, method='SLSQP')
 	print test
+
 
 ##########################################################################
 # for spectral coherece analysis
@@ -330,16 +340,14 @@ def PlotPSD():
 ##########################################################################
 
 def Calculate_Epenpan_daily():
-	# Pan_obs = []
-	# Pan_obs_gapfill = []
+	Pan_obs_gapfill = []
 	Pan_mod = []
 	for ibasin in xrange(0, 10):
 		for istation in good_stations[ibasin]:
 			print ibasin, istation
 			data = scipy.io.loadmat('%s/%s_AP.mat' %(datadir, ibasin+1))
 			index = np.where(geoinfo[:, 0]==data['station_name'][0, istation])[0]
-			# pan_obs = data['pan'][0, istation][0:tstep].flatten()
-			# pan_obs_gapfill = Gapfill(data['pan'][0, istation][0:tstep].flatten())
+			pan_obs_gapfill = Gapfill(data['pan'][0, istation][0:tstep].flatten())
 			## Prepare for the input data for Epan calculation
 			INPUT = {vars_penpan[i]: Gapfill(data[v][0, istation][0:tstep].flatten()) for i, v in enumerate(vars_penpan[:-2])}
 			INPUT['doy'] = doys.flatten()
@@ -347,21 +355,84 @@ def Calculate_Epenpan_daily():
 			INPUT['elev'] = geoinfo[index, 3]
 
 			## Calculate Epan and evaluation
-			pan_mod = Data(INPUT, 'cloud').penpan
+			pan_mod = Data(INPUT, 'sunhours').penpan
 			# Collect the data and geoinfo for map showing
-			# Pan_obs.append(pan_obs)
-			# Pan_obs_gapfill.append(pan_obs_gapfill)
+			Pan_obs_gapfill.append(pan_obs_gapfill)
 			Pan_mod.append(pan_mod)
-	# Pan_obs = vstack(Pan_obs)
-	# Pan_obs_gapfill = vstack(Pan_obs_gapfill)
+	Pan_obs_gapfill = vstack(Pan_obs_gapfill)
 	Pan_mod = vstack(Pan_mod)
-	# Pan_obs.dump('%s/pan_obs_qc_good_stations' %workspace)
-	# Pan_obs_gapfill.dump('%s/pan_obs_gapfill_qc_stations' %workspace)
-	Pan_mod.dump('%s/pan_mod_good_stations_u56' %workspace)
+	Pan_obs_gapfill.dump('%s/pan_obs_gapfill_good_stations' %workspace)
+	Pan_mod.dump('%s/pan_mod_good_stations' %workspace)
 
 	return
+
 # Calculate_Epenpan_daily()
 # exit()
+
+def Calculate_radiation_daily():
+	Rs = []
+	Rnl = []
+	Rn = []
+	for ibasin in xrange(0, 10):
+		for istation in good_stations[ibasin]:
+			print ibasin, istation
+			data = scipy.io.loadmat('%s/%s_AP.mat' %(datadir, ibasin+1))
+			index = np.where(geoinfo[:, 0]==data['station_name'][0, istation])[0]
+			## Prepare for the input data for Epan calculation
+			INPUT = {vars_penpan[i]: Gapfill(data[v][0, istation][0:tstep].flatten()) for i, v in enumerate(vars_penpan[:-2])}
+			INPUT['doy'] = doys.flatten()
+			INPUT['lat'] = geoinfo[index, 1]
+			INPUT['elev'] = geoinfo[index, 3]
+
+			## Calculate
+			result = Data(INPUT, 'sunhours')
+			Rs.append(result.SWin)
+			Rnl.append(result.LWnet)
+			Rn.append(result.Rn_pan)
+	Rs = vstack(Rs)
+	Rnl = vstack(Rnl)
+	Rn = vstack(Rn)
+	Rs.dump('%s/Rs_0.25_0.5_good_stations' %(workspace))
+	Rnl.dump('%s/Rnl_FAO_0.25_0.5_good_stations' %(workspace))
+	Rn.dump('%s/Rn_0.25_0.5_good_stations' %(workspace))
+
+	return
+# Calculate_radiation_daily()
+# exit()
+
+def Coherence_obs_radiation():
+
+	## Prepare the data for plotting
+	# pan_obs_gapfill = load('%s/pan_obs_gapfill_qc_stations' %workspace)
+	r2_60_stations = pickle.load(open('r2_60_stations','rb'))
+	r2_60 = hstack(r2_60_stations)
+	pan_obs_gapfill = load('%s/pan_obs_gapfill_good_stations' %workspace)[r2_60,:]
+	Rs = load('%s/Rs_0.25_0.5_good_stations' %(workspace))[r2_60,:]
+	Rnl = load('%s/Rnl_FAO_0.25_0.5_good_stations' %(workspace))[r2_60,:]
+	Rn = load('%s/Rn_0.25_0.5_good_stations' %(workspace))[r2_60,:]
+
+	relatetable = load('%s/relatetable' %workspace)
+	ist = 0
+	for ibasin in xrange(0, 10):
+		cohere_obs_basin = []
+		for istation in relatetable[r2_60_stations[ibasin], 1]: #station_pan_qc[ibasin]:
+			# the PowerSpectrum method take the matrix as different segment, so shoule be a 1d array
+			panobs = pan_obs_gapfill[ist, :].flatten()
+			rs = Rs[ist, :].flatten()
+			rnl = Rnl[ist, :].flatten()
+			rn = Rn[ist, :].flatten()
+			rad = [rs, rnl, rn]
+			# Compute the coherence
+			cohere_obs_basin.append(vstack([FFT.Coherence(r, panobs, sampling_frequency, 'linear')[1] for r in rad]).reshape(1, 3, nf))
+			ist = ist + 1
+
+		cohere_obs_basin = vstack(cohere_obs_basin)
+		cohere_obs_basin.dump('%s/coherence_obs_radiation_0.25_0.5_r2_60_station_%s' %(workspace, basinlongs[ibasin]))
+
+# Coherence_obs_radiation()
+# exit()
+
+
 def Coherence_obs_qc():
 
 	## Prepare the data for plotting
@@ -390,6 +461,8 @@ def Coherence_obs_qc():
 
 	return
 # Coherence_obs_qc()
+# exit()
+
 
 def Coherence_mod_r260():
 
@@ -419,6 +492,7 @@ def Coherence_mod_r260():
 	return
 # Coherence_mod_r260()
 # exit()
+
 def Coherence_obs_mod_r260():
 
 	## Prepare the data for plotting
@@ -434,7 +508,10 @@ def Coherence_obs_mod_r260():
 			# panmod = pan_mod[istation, :].flatten()
 			panmod = pan_mod[istation, :].flatten() * stats_basin[ibasin, 0]
 			# Compute the coherence
-			cohere_obs_mod_basin.append(FFT.Coherence(panobs, panmod, sampling_frequency, 'linear')[1])
+			# data = FFT.Coherence(panobs, panobs, sampling_frequency, 'linear')[1]
+			# Plotting.CoherenceStationPlot(data, sampling_frequency, Coherence_Frequency())
+			# exit()
+			# cohere_obs_mod_basin.append(FFT.Coherence(panobs, panmod, sampling_frequency, 'linear')[1])
 
 		# store basin average
 		cohere_obs_mod_basin = vstack(cohere_obs_mod_basin)
@@ -443,6 +520,7 @@ def Coherence_obs_mod_r260():
 	return
 # Coherence_obs_mod_r260()
 # exit()
+
 def Plot_Coherence_Basin():
 
 	fig = plt.figure(figsize=(24, 18))
@@ -452,7 +530,8 @@ def Plot_Coherence_Basin():
 		# cohere_basin = load('%s/coherence_obs_var_qc_station_%s' %(workspace, basinlongs[ibasin]))
 		# cohere_basin = load('%s/coherence_mod_var_goodstation_%s' %(workspace, basinlongs[ibasin]))
 		# cohere_basin = load('%s/coherence_obs_var_r2_60_station_%s' %(workspace, basinlongs[ibasin]))
-		cohere_basin = load('%s/coherence_mod_var_goodstation_r2_60_u56_%s' %(workspace, basinlongs[ibasin]))
+		# cohere_basin = load('%s/coherence_mod_var_goodstation_r2_60_u56_%s' %(workspace, basinlongs[ibasin]))
+		cohere_basin = load('%s/coherence_obs_radiation_%s_r2_60_station_%s' %(workspace, 'cloud', basinlongs[ibasin]))
 		cohere.append(cohere_basin)
 
 		## DRAW FIGURE---------------
@@ -466,8 +545,9 @@ def Plot_Coherence_Basin():
 	fig.tight_layout()
 	plt.show()
 	return
-# Plot_Coherence_Basin()
-# exit()
+Plot_Coherence_Basin()
+exit()
+
 def Plot_Coherence_obs_mod():
 
 	fig = plt.figure(figsize=(24, 18))
@@ -584,6 +664,8 @@ def Epenpan_trend_attribution():
 
 # Epenpan_trend_attribution()
 # exit()
+
+
 ##====================================================================
 # Run the step functions for trend attribution analysis
 ##====================================================================

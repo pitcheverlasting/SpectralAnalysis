@@ -16,8 +16,8 @@ class Data:
 		self.Pres = self.Convert_Unit_Pres(INPUT['p'])
 		self.e = self.Convert_Unit_Pres(INPUT['ea'])    # vapor pressure: hpa
 		self.Wind = INPUT['wind']  # Wind: m/s
-		# self.sunhour = INPUT['sun']  # sunhour: hour
-		self.CF = self.Convert_Unit_CF(INPUT['tc'])
+		self.sunhour = INPUT['sun']  # sunhour: hour
+		# self.CF = self.Convert_Unit_CF(INPUT['tc'])
 		self.lat = INPUT['lat']
 		self.elev = INPUT['elev']
 		self.doy = INPUT['doy']
@@ -104,7 +104,7 @@ class Data:
 			z2 = 30  # set the station elevation above the sea level as 30m
 		Gsc = 0.082   # solar constant = 0.082 [MJ m^-2 min^-1]
 		# Ra: extraterrestrial radiation for daily period for different location, different daytime
-		self.Ra = 24 * 60 / np.pi * Gsc * dr *(omega * np.sin(phi) * np.sin(delta) + np.cos(phi) * np.cos(delta) * np.sin(omega))
+		self.Ra = 24 * 60 / np.pi * Gsc * dr * (omega * np.sin(phi) * np.sin(delta) + np.cos(phi) * np.cos(delta) * np.sin(omega))
 		self.Rso = (0.75 + 2e-5 * z2) * self.Ra
 
 		return
@@ -126,7 +126,7 @@ class Data:
 	def Calculate_LWnet(self):
 
 		stefan_b = 4.903e-9  # [MJ K-4 m-2 day-1]
-		emissivity = 1
+		epsilon_s = 0.98
 		self.LWnet = stefan_b * ((self.Tmax+273.16)**4 + (self.Tmin+273.16)**4) / 2.0 * (0.34-0.14 * np.sqrt(self.e)) * (1.35 * self.SWin/self.Rso - 0.35)
 		# self.LWnet = stefan_b * (self.Tair+273.16)**4 * (0.34-0.14 * np.sqrt(self.e)) * (1.35 * self.SWin/self.Rso - 0.35)
 		self.PDLWnet_PDTair = - 4 * stefan_b * (self.Tair+273.16)**3 * (0.34-0.14 * np.sqrt(self.e)) * (1.35 * self.SWin/self.Rso - 0.35)

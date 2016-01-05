@@ -14,7 +14,8 @@ def CoherenceStationPlot(coh, fs, freq):
 	drivername = ['Tair','Rs','Wind','Humidity','Low Cloud', 'Tsurf', 'VPD', 'Rain']
 	# linestyle = ['-o','-s','-*','-^','-','-o','-s','-*']
 	plt.figure()
-	[plt.semilogx(fs/freq, coh[i], color=col[i], linewidth=2.5) for i in xrange(0, nvar)]
+	# [plt.semilogx(fs/freq, coh[i], color=col[i], linewidth=2.5) for i in xrange(0, nvar)]
+	plt.semilogx(fs/freq, coh, color=col[0], linewidth=2.5)
 	plt.plot([365, 365], [0, 1], 'r--', linewidth=3.5)
 	plt.plot([120, 120], [0, 1], 'k--', linewidth=3.5)
 	plt.plot([30, 30], [0, 1], 'b--', linewidth=3.5)
@@ -26,8 +27,11 @@ def CoherenceStationPlot(coh, fs, freq):
 def CoherenceBasinPlot(ax, coh, fs, freq, title):
 
 	nvar = coh.shape[0]
-	col = ['LightCoral', 'Orange', 'MediumSpringGreen', 'Orchid', 'SkyBlue', 'Crimson', 'Purple', 'Aquamarine']
-	drivername = ['Tair','Rs','Wind','Humidity','Cloudiness', 'Tsurf', 'VPD', 'Rain']
+	# col = ['LightCoral', 'Orange', 'MediumSpringGreen', 'Orchid', 'SkyBlue', 'Crimson', 'Purple', 'Aquamarine']
+	# drivername = ['Tair','Rs','Wind','Humidity','Cloudiness', 'Tsurf', 'VPD', 'Rain']
+	col = ['Orange', 'LightCoral', 'SkyBlue']
+	drivername = ['Rs', 'Rnl','Rn']
+
 	# linestyle = ['-o','-s','-*','-^','-','-o','-s','-*']
 	[ax.semilogx(fs/freq, coh[i, :], color=col[i], linewidth=2.5, label=drivername[i]) for i in xrange(0, nvar)]
 	# ax.xaxis.set_visible(False)
@@ -128,8 +132,6 @@ def Mapshow(data, lons, lats, size, alpha, min, max, cmp, title, legend, unit, f
 		im = m.scatter(lons, lats, size, marker='o', c=data, edgecolors='none', alpha=alpha, vmin=min, vmax=max, latlon=True, cmap=cmp, label=legend)
 		cb = m.colorbar(im, pad='3%')
 		cb.ax.tick_params(labelsize=20)
-	# plotdata = m.transform_scalar(data, lons, lats, nx, ny)
-	# im = m.imshow(plotdata, vmin=min, vmax=max, cmap=cmp)
 	plt.title(title, fontsize=16, y=1.02)
 	# plt.legend(loc=3, prop={'size': 18})
 	plt.xlabel(unit, fontsize=21, labelpad=19)
